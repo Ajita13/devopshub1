@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from "react";
 import { io } from "socket.io-client";
 import { getToken } from "../services/api";
+import { useAuth } from "../auth/AuthContext";
 
 const SocketContext = createContext(null);
 
@@ -11,10 +12,11 @@ export function SocketProvider({ children }) {
   const [connectionStatus, setConnectionStatus] = useState("connecting"); // "connected" | "connecting" | "offline"
   const socketRef = useRef(null);
 
+  const { user } = useAuth();
   const token = getToken();
 
   useEffect(() => {
-    if (!token) {
+    if (!token && !user) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -57,7 +59,7 @@ export function SocketProvider({ children }) {
       socketInstance.disconnect();
       socketRef.current = null;
     };
-  }, [token]);
+  }, [token, user]);
 
   const value = {
     socket,

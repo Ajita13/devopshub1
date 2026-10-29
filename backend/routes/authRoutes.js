@@ -5,6 +5,7 @@ const { authenticate } = require("../middleware/auth");
 const {
   register,
   login,
+  googleLogin,
   refresh,
   logout,
   getMe,
@@ -14,6 +15,15 @@ const {
 } = require("../controllers/authController");
 
 const router = express.Router();
+
+const googleSchema = z.object({
+  body: z.object({
+    email: z.string().email("Invalid email address"),
+    name: z.string().optional().nullable(),
+    avatar: z.string().optional().nullable(),
+    uid: z.string().optional().nullable(),
+  }),
+});
 
 const registerSchema = z.object({
   body: z.object({
@@ -45,6 +55,7 @@ const forgotPasswordSchema = z.object({
 
 router.post("/register", validate(registerSchema), register);
 router.post("/login", validate(loginSchema), login);
+router.post("/google", validate(googleSchema), googleLogin);
 router.post("/refresh", refresh);
 router.post("/logout", logout);
 router.post("/forgot-password", validate(forgotPasswordSchema), forgotPassword);

@@ -126,6 +126,20 @@ export const loginUser = async (credentials) => {
   return data;
 };
 
+export const googleLoginApi = async (googleData) => {
+  const data = await apiRequest("/auth/google", {
+    method: "POST",
+    body: JSON.stringify(googleData),
+  });
+  if (data.accessToken) {
+    setToken(data.accessToken);
+    if (data.refreshToken) {
+      localStorage.setItem("devopshub_refresh_token", data.refreshToken);
+    }
+  }
+  return data;
+};
+
 export const registerUser = async (userData) => {
   const data = await apiRequest("/auth/register", {
     method: "POST",

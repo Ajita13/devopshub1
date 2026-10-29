@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "DevOpsHub - CI/CD Pipeline Management Platform with Real-Time WebSocket Telemetry",
   "scripts": {
+    "dev": "node start-dev.js",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix react run dev",
     "start:backend": "npm --prefix backend start",

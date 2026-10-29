@@ -311,6 +311,88 @@ async function changePassword(req, res, next) {
   }
 }
 
+async function googleLogin(req, res, next) {
+  try {
+    const { email, name, avatar } = req.body;
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required for Google authentication.",
+      });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    let user = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+    });
+
+    if (!user) {
+      const crypto = require("crypto");
+      const randomPassword = crypto.randomBytes(32).toString("hex");
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash(randomPassword, salt);
+
+      user = await prisma.user.create({
+        data: {
+          name: name ? name.trim() : cleanEmail.split("@")[0],
+          email: cleanEmail,
+          password: passwordHash,
+          avatar: avatar || null,
+          role: "user",
+        },
+      });
+
+      await prisma.systemLog.create({
+        data: {
+          level: "INFO",
+          service: "Google OAuth",
+          message: `User ${user.email} signed in via Google and workspace initialized`,
+          userId: user.id,
+        },
+      });
+    } else {
+      if (avatar && !user.avatar) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { avatar },
+        });
+      }
+    }
+
+    const safeUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      createdAt: user.createdAt,
+    };
+
+    const accessToken = generateAccessToken(safeUser);
+    const refreshToken = generateRefreshToken(safeUser);
+
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    res.cookie("refreshToken", refreshToken, COOKIE_OPTIONS);
+
+    return res.json({
+      success: true,
+      message: "Google authentication successful",
+      user: safeUser,
+      accessToken,
+      refreshToken,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function forgotPassword(req, res, next) {
   try {
     const { email } = req.body;
@@ -327,6 +409,7 @@ async function forgotPassword(req, res, next) {
 module.exports = {
   register,
   login,
+  googleLogin,
   refresh,
   logout,
   getMe,
