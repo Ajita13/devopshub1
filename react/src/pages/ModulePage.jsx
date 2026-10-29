@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Plus,
   Search,
@@ -7,304 +7,225 @@ import {
   Clock3,
   AlertCircle,
   Activity,
+  Loader2,
+  RefreshCw,
+  X,
 } from "lucide-react";
+import { getModuleData, createModuleItem } from "../services/api";
+import { useSocket } from "../context/SocketContext";
 
 function ModulePage({ title, description, type }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
 
-  const data = {
-    templates: [
-      ["Node.js CI/CD", "Node.js", "Active", "2 hours ago"],
-      ["React Production", "React", "Active", "5 hours ago"],
-      ["Python Backend", "Python", "Active", "1 day ago"],
-    ],
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-    triggers: [
-      ["Push Trigger", "main", "Active", "GitHub"],
-      ["Pull Request", "develop", "Active", "GitHub"],
-      ["Scheduled Build", "Every night", "Active", "Scheduler"],
-    ],
+  const { socket } = useSocket();
 
-    webhooks: [
-      ["GitHub Webhook", "Connected", "Active", "GitHub"],
-      ["Docker Webhook", "Connected", "Active", "Docker"],
-      ["Deployment Hook", "Connected", "Active", "Internal"],
-    ],
+  const loadData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    try {
+      const res = await getModuleData(type);
+      if (res && res.success) {
+        setItems(res.items || []);
+        setError("");
+      }
+    } catch (err) {
+      console.error(`Failed to load module data for ${type}:`, err);
+      if (!isSilent) setError(err.message || "Failed to load data.");
+    } finally {
+      if (!isSilent) setLoading(false);
+    }
+  }, [type]);
 
-    environments: [
-      ["Development", "dev", "Healthy", "99.9%"],
-      ["Staging", "staging", "Healthy", "99.7%"],
-      ["Production", "main", "Healthy", "99.9%"],
-    ],
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
-    releases: [
-      ["Release v2.1", "Production", "Success", "Today"],
-      ["Release v2.0", "Production", "Success", "Yesterday"],
-      ["Release v1.9", "Staging", "Success", "2 days ago"],
-    ],
+  // Real-time updates
+  useEffect(() => {
+    if (!socket) return;
 
-    insights: [
-      ["Build Success Rate", "94.7%", "Improving", "+6.2%"],
-      ["Deployment Frequency", "16", "Improving", "+33%"],
-      ["Avg Deploy Time", "3m 47s", "Improving", "-18%"],
-    ],
+    const handleUpdate = (payload) => {
+      if (payload?.type === type) {
+        loadData(true);
+      }
+    };
 
-    alerts: [
-      ["High CPU Usage", "Production Server", "Warning", "10 min ago"],
-      ["Build Failed", "release/v2.1", "Critical", "25 min ago"],
-      ["Deployment Completed", "Production", "Resolved", "1 hour ago"],
-    ],
+    socket.on("module:updated", handleUpdate);
+    return () => {
+      socket.off("module:updated", handleUpdate);
+    };
+  }, [socket, type, loadData]);
 
-    services: [
-      ["GitHub", "Source Control", "Connected", "Healthy"],
-      ["Docker", "Container Registry", "Connected", "Healthy"],
-      ["Jenkins", "CI Server", "Connected", "Healthy"],
-    ],
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!newItemName.trim()) return;
 
-    docker: [
-      ["devopshub/frontend", "v2.1.0", "Latest", "120 MB"],
-      ["devopshub/backend", "v2.0.4", "Latest", "210 MB"],
-      ["devopshub/api", "v1.9.2", "Older", "185 MB"],
-    ],
-
-    secrets: [
-      ["DATABASE_URL", "Production", "Protected", "Updated today"],
-      ["API_KEY", "Production", "Protected", "Updated yesterday"],
-      ["JWT_SECRET", "Backend", "Protected", "Updated 2 days ago"],
-    ],
-
-    permissions: [
-      ["Admin", "Full Access", "4 users", "Active"],
-      ["Developer", "Build + Deploy", "8 users", "Active"],
-      ["Viewer", "Read Only", "12 users", "Active"],
-    ],
-
-    audit: [
-      ["Ajita", "Pipeline Created", "DevOpsHub", "2 min ago"],
-      ["Admin", "Deployment Started", "Production", "15 min ago"],
-      ["System", "Security Scan", "Pipeline", "30 min ago"],
-    ],
-
-    integrations: [
-      ["GitHub", "Source Control", "Connected", "Healthy"],
-      ["Docker Hub", "Container Registry", "Connected", "Healthy"],
-      ["Slack", "Notifications", "Not Connected", "—"],
-    ],
-
-    team: [
-      ["Ajita", "Administrator", "Admin", "Active"],
-      ["DevOps Engineer", "Developer", "Developer", "Active"],
-      ["QA Engineer", "Tester", "Viewer", "Active"],
-    ],
-
-    general: [
-      ["Theme", "Light", "Appearance", "Enabled"],
-      ["Notifications", "Enabled", "Preferences", "Enabled"],
-      ["Auto Refresh", "30 seconds", "Dashboard", "Enabled"],
-    ],
+    try {
+      setSubmitting(true);
+      await createModuleItem(type, {
+        name: newItemName.trim(),
+        key: newItemName.trim().toUpperCase().replace(/\s+/g, "_"),
+        version: newItemName.trim(),
+      });
+      setShowAddModal(false);
+      setNewItemName("");
+      loadData(true);
+    } catch (err) {
+      alert(err.message || "Failed to create item.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const rows = data[type] || [];
-
-  const filteredRows = rows.filter((row) =>
-    row.join(" ").toLowerCase().includes(search.toLowerCase())
+  const filteredItems = items.filter((row) =>
+    row.some((cell) => String(cell).toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
     <div className="p-6">
-
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-
+      <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            {title}
-          </h1>
+          <h1 className="text-xl font-bold tracking-tight">{title}</h1>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{description}</p>
+        </div>
 
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
-            {description}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => loadData()}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-[#15191d] dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-orange-600"
+          >
+            <Plus size={15} />
+            <span>Add Item</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Search Input */}
+      <div className="mb-4 relative w-full sm:w-72">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={`Search ${title.toLowerCase()}...`}
+          className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:border-slate-800 dark:bg-[#15191d] dark:text-white"
+        />
+      </div>
+
+      {/* Content Table / Cards */}
+      {loading ? (
+        <div className="flex min-h-[30vh] items-center justify-center">
+          <Loader2 size={28} className="animate-spin text-orange-500" />
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-6 text-center text-red-500">
+          <AlertCircle size={24} className="mx-auto mb-2" />
+          <p className="text-sm font-semibold">{error}</p>
+          <button
+            onClick={() => loadData()}
+            className="mt-3 rounded-lg bg-red-600 px-4 py-1.5 text-xs font-medium text-white"
+          >
+            Retry
+          </button>
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <Activity size={32} className="mx-auto mb-2 text-slate-400 opacity-40" />
+          <p className="text-sm font-semibold">No records found for {title}</p>
+          <p className="mt-1 text-xs text-slate-400">
+            Click "Add Item" above to add your first record to this module.
           </p>
         </div>
-
-        <button
-          onClick={() => alert(`Create ${title} clicked`)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-medium transition"
-        >
-          <Plus size={18} />
-          Create New
-        </button>
-
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-
-        <Stat
-          title="Total"
-          value={rows.length}
-          icon={<Activity size={20} />}
-        />
-
-        <Stat
-          title="Active"
-          value={rows.length}
-          icon={<CheckCircle2 size={20} />}
-        />
-
-        <Stat
-          title="Pending"
-          value="2"
-          icon={<Clock3 size={20} />}
-        />
-
-        <Stat
-          title="Issues"
-          value="1"
-          icon={<AlertCircle size={20} />}
-        />
-
-      </div>
-
-      {/* Search */}
-      <div className="bg-white dark:bg-[#15191e] rounded-xl border border-gray-200 dark:border-gray-800">
-
-        <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-
-          <div className="relative max-w-md">
-
-            <Search
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-            />
-
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={`Search ${title.toLowerCase()}...`}
-              className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#101418] text-gray-900 dark:text-white outline-none focus:border-orange-500"
-            />
-
-          </div>
-
-        </div>
-
-        {/* Table */}
-        <div className="overflow-x-auto">
-
-          <table className="w-full">
-
-            <thead>
-              <tr className="text-left bg-gray-50 dark:bg-[#101418]">
-
-                <th className="px-5 py-3 text-sm font-semibold">
-                  Name
-                </th>
-
-                <th className="px-5 py-3 text-sm font-semibold">
-                  Details
-                </th>
-
-                <th className="px-5 py-3 text-sm font-semibold">
-                  Status
-                </th>
-
-                <th className="px-5 py-3 text-sm font-semibold">
-                  Updated
-                </th>
-
-                <th className="px-5 py-3 text-sm font-semibold">
-                  Action
-                </th>
-
-              </tr>
-            </thead>
-
-            <tbody>
-
-              {filteredRows.map((row, index) => (
-
-                <tr
-                  key={index}
-                  className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-[#1b2026]"
-                >
-
-                  <td className="px-5 py-4 font-medium text-gray-900 dark:text-white">
-                    {row[0]}
-                  </td>
-
-                  <td className="px-5 py-4 text-gray-500 dark:text-gray-400">
-                    {row[1]}
-                  </td>
-
-                  <td className="px-5 py-4">
-
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-600 dark:bg-green-900/20">
-                      <CheckCircle2 size={13} />
-                      {row[2]}
-                    </span>
-
-                  </td>
-
-                  <td className="px-5 py-4 text-gray-500 dark:text-gray-400">
-                    {row[3]}
-                  </td>
-
-                  <td className="px-5 py-4">
-
-                    <button
-                      onClick={() => alert(`Viewing ${row[0]}`)}
-                      className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <table className="w-full text-left text-xs">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filteredItems.map((row, index) => (
+                <tr key={index} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                  {row.map((cell, cIdx) => (
+                    <td
+                      key={cIdx}
+                      className={`p-3.5 ${
+                        cIdx === 0
+                          ? "font-semibold text-slate-800 dark:text-slate-200"
+                          : "text-slate-500 dark:text-slate-400"
+                      }`}
                     >
-                      <MoreVertical size={18} />
-                    </button>
-
-                  </td>
-
+                      {String(cell)}
+                    </td>
+                  ))}
                 </tr>
-
               ))}
-
             </tbody>
-
           </table>
+        </div>
+      )}
 
-          {filteredRows.length === 0 && (
-            <div className="p-10 text-center text-gray-500">
-              No results found.
+      {/* Add Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-[#15191d]">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <h2 className="text-sm font-bold">Add to {title}</h2>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+              >
+                <X size={16} />
+              </button>
             </div>
-          )}
 
+            <form onSubmit={handleCreate} className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Name / Identifier
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value)}
+                  placeholder={`e.g. New ${title}`}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-orange-500 dark:border-slate-700 dark:bg-[#101316] dark:text-white"
+                />
+              </div>
+
+              <div className="mt-5 flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-xs font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+                >
+                  {submitting && <Loader2 size={13} className="animate-spin" />}
+                  <span>Save</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-
-      </div>
-
-    </div>
-  );
-}
-
-function Stat({ title, value, icon }) {
-  return (
-    <div className="bg-white dark:bg-[#15191e] border border-gray-200 dark:border-gray-800 rounded-xl p-5">
-
-      <div className="flex items-center justify-between">
-
-        <div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {title}
-          </p>
-
-          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {value}
-          </p>
-        </div>
-
-        <div className="w-10 h-10 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-500 flex items-center justify-center">
-          {icon}
-        </div>
-
-      </div>
-
+      )}
     </div>
   );
 }

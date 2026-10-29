@@ -1,0 +1,25 @@
+{
+  "name": "devopshub-platform",
+  "version": "1.0.0",
+  "description": "DevOpsHub - CI/CD Pipeline Management Platform with Real-Time WebSocket Telemetry",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix react run dev",
+    "start:backend": "npm --prefix backend start",
+    "build:frontend": "npm --prefix react run build",
+    "seed": "npm --prefix backend run seed",
+    "test": "npm --prefix backend test"
+  },
+  "keywords": [
+    "devops",
+    "cicd",
+    "pipeline",
+    "realtime",
+    "socketio",
+    "react",
+    "express",
+    "prisma"
+  ],
+  "author": "DevOpsHub",
+  "license": "ISC"
+}

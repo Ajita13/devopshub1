@@ -1,6 +1,7 @@
+import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Activity,
-  BarChart3,
   CheckCircle2,
   Clock3,
   GitCommit,
@@ -9,188 +10,63 @@ import {
   ShieldCheck,
   FlaskConical,
   XCircle,
-  Server,
-  Code2,
-  TestTube2,
+  Plus,
+  ArrowRight,
+  Loader2,
+  AlertCircle,
+  Radio,
 } from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
+import { useAuth } from "../../auth/AuthContext";
+import { useSocket } from "../../context/SocketContext";
+import { getDashboardStats } from "../../services/api";
 
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+const statIconMap = {
+  pipeline: GitCommit,
+  success: CheckCircle2,
+  failed: XCircle,
+  deployment: Rocket,
+  time: Clock3,
+  security: ShieldCheck,
+};
 
-const stats = [
-  {
-    title: "Total Pipelines",
-    value: "24",
-    change: "+14% from last week",
-    icon: GitCommit,
-    iconClass: "bg-blue-100 text-blue-600",
-    positive: true,
-    path: "/pipelines",
-  },
-  {
-    title: "Successful Builds",
-    value: "18",
-    change: "+28% from last week",
-    icon: CheckCircle2,
-    iconClass: "bg-green-100 text-green-600",
-    positive: true,
-    path: "/builds",
-  },
-  {
-    title: "Failed Builds",
-    value: "3",
-    change: "12% from last week",
-    icon: XCircle,
-    iconClass: "bg-red-100 text-red-600",
-    positive: false,
-    path: "/builds",
-  },
-  {
-    title: "Deployments",
-    value: "16",
-    change: "+33% from last week",
-    icon: Rocket,
-    iconClass: "bg-purple-100 text-purple-600",
-    positive: true,
-    path: "/deployments",
-  },
-  {
-    title: "Avg. Deploy Time",
-    value: "3m 47s",
-    change: "18% from last week",
-    icon: Clock3,
-    iconClass: "bg-orange-100 text-orange-600",
-    positive: true,
-    path: "/deployments",
-  },
-  {
-    title: "Success Rate",
-    value: "94.7%",
-    change: "+6.2% from last week",
-    icon: ShieldCheck,
-    iconClass: "bg-blue-100 text-blue-600",
-    positive: true,
-    path: "/analytics",
-  },
-];
-
-const pipelineStages = [
-  {
-    name: "Code Commit",
-    value: "128 commits",
-    icon: GitCommit,
-    path: "/pipelines",
-  },
-  {
-    name: "Build",
-    value: "24 builds",
-    icon: Hammer,
-    path: "/builds",
-  },
-  {
-    name: "Test",
-    value: "92 tests",
-    icon: FlaskConical,
-    path: "/pipelines",
-  },
-  {
-    name: "Security Scan",
-    value: "24 scans",
-    icon: ShieldCheck,
-    path: "/insights",
-  },
-  {
-    name: "Deploy",
-    value: "16 deployments",
-    icon: Rocket,
-    path: "/deployments",
-  },
-  {
-    name: "Monitor",
-    value: "99.5% uptime",
-    icon: Activity,
-    path: "/services",
-  },
-];
-
-const deployments = [
-  ["Production Deployment", "main", "2m ago", "Success"],
-  ["Staging Deployment", "develop", "15m ago", "Success"],
-  ["Production Deployment", "release/v2.1", "1h ago", "Success"],
-  ["QA Deployment", "feature/login", "2h ago", "Success"],
-  ["Hotfix Deployment", "hotfix/critical", "5h ago", "Failed"],
-];
-
-const builds = [
-  ["Build #1247", "main", "2m 45s", "Success"],
-  ["Build #1246", "develop", "1m 32s", "Success"],
-  ["Build #1245", "feature/auth", "2m 18s", "Success"],
-  ["Build #1244", "release/v2.1", "3m 05s", "Failed"],
-  ["Build #1243", "hotfix/critical", "1m 45s", "Success"],
-];
-
-const services = [
-  ["CI/CD Service", "99.9%"],
-  ["Build Agents", "98.7%"],
-  ["Deployment Service", "100%"],
-  ["Container Registry", "99.5%"],
-  ["Monitoring Service", "99.8%"],
-];
-
-const activities = [
-  {
-    title: "Code pushed to main",
-    user: "Ajita",
-    time: "2m ago",
-    icon: Code2,
-    className: "bg-gray-100 text-gray-700",
-  },
-  {
-    title: "Build #1247 completed",
-    user: "CI System",
-    time: "2m 45s ago",
-    icon: Hammer,
-    className: "bg-blue-100 text-blue-600",
-  },
-  {
-    title: "Deployed to Production",
-    user: "CD System",
-    time: "3m ago",
-    icon: Rocket,
-    className: "bg-orange-100 text-orange-600",
-  },
-  {
-    title: "Security scan completed",
-    user: "Security Bot",
-    time: "5m ago",
-    icon: ShieldCheck,
-    className: "bg-green-100 text-green-600",
-  },
-  {
-    title: "Tests completed",
-    user: "Test Runner",
-    time: "7m ago",
-    icon: TestTube2,
-    className: "bg-cyan-100 text-cyan-600",
-  },
-];
+const stageIconMap = {
+  commit: GitCommit,
+  build: Hammer,
+  test: FlaskConical,
+  security: ShieldCheck,
+  deploy: Rocket,
+  monitor: Activity,
+};
 
 function StatusBadge({ status }) {
-  const success = status === "Success";
+  const success = status === "SUCCESS" || status === "Success";
+  const running = status === "RUNNING" || status === "In progress";
+
+  if (running) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-500">
+        <Loader2 size={11} className="animate-spin" />
+        Running
+      </span>
+    );
+  }
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold ${
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${
         success
-          ? "bg-green-50 text-green-600"
-          : "bg-red-50 text-red-500"
+          ? "bg-green-500/10 text-green-600 dark:text-green-400"
+          : "bg-red-500/10 text-red-500"
       }`}
     >
-      {success ? (
-        <CheckCircle2 size={12} />
-      ) : (
-        <XCircle size={12} />
-      )}
+      {success ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
       {status}
     </span>
   );
@@ -198,595 +74,427 @@ function StatusBadge({ status }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { socket, isConnected } = useSocket();
 
-  const [pipelinePeriod, setPipelinePeriod] =
-    useState("This Week");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const [analyticsPeriod, setAnalyticsPeriod] =
-    useState("Last 7 days");
+  const fetchStats = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    try {
+      const res = await getDashboardStats();
+      if (res && res.success) {
+        setData(res);
+        setError("");
+      }
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+      if (!isSilent) setError(err.message || "Failed to load dashboard data");
+    } finally {
+      if (!isSilent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  // Real-time socket event listeners for instant UI synchronization
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleRealtimeUpdate = () => {
+      fetchStats(true); // silent refresh
+    };
+
+    socket.on("stats:refresh", handleRealtimeUpdate);
+    socket.on("pipeline:created", handleRealtimeUpdate);
+    socket.on("pipeline:updated", handleRealtimeUpdate);
+    socket.on("pipeline:deleted", handleRealtimeUpdate);
+    socket.on("build:created", handleRealtimeUpdate);
+    socket.on("build:updated", handleRealtimeUpdate);
+    socket.on("deployment:created", handleRealtimeUpdate);
+    socket.on("activity:new", handleRealtimeUpdate);
+
+    return () => {
+      socket.off("stats:refresh", handleRealtimeUpdate);
+      socket.off("pipeline:created", handleRealtimeUpdate);
+      socket.off("pipeline:updated", handleRealtimeUpdate);
+      socket.off("pipeline:deleted", handleRealtimeUpdate);
+      socket.off("build:created", handleRealtimeUpdate);
+      socket.off("build:updated", handleRealtimeUpdate);
+      socket.off("deployment:created", handleRealtimeUpdate);
+      socket.off("activity:new", handleRealtimeUpdate);
+    };
+  }, [socket, fetchStats]);
+
+  const userName = user?.name || "Engineer";
+
+  if (loading && !data) {
+    return (
+      <div className="flex min-h-[70vh] flex-col items-center justify-center p-6 text-slate-500">
+        <Loader2 size={32} className="animate-spin text-orange-500 mb-3" />
+        <p className="text-sm font-medium">Aggregating live DevOps metrics...</p>
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="p-8">
+        <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-6 text-center text-red-500">
+          <AlertCircle size={28} className="mx-auto mb-2" />
+          <h2 className="text-base font-semibold">Unable to Load Dashboard</h2>
+          <p className="mt-1 text-xs">{error}</p>
+          <button
+            onClick={() => fetchStats()}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const stats = data?.stats || [];
+  const stages = data?.stages || [];
+  const analyticsChart = data?.analyticsChart || [];
+  const recentDeployments = data?.recentDeployments || [];
+  const recentBuilds = data?.recentBuilds || [];
+  const recentActivities = data?.recentActivities || [];
+  const totalBuilds = data?.totalBuilds || 0;
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] px-5 py-5 text-[#111827] dark:bg-[#0b0d0f] dark:text-white">
+    <div className="min-h-screen bg-[#f8fafc] px-6 py-6 text-slate-900 dark:bg-[#0b0d0f] dark:text-white">
+      {/* Header */}
+      <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">
+            Welcome back, {userName}! 👋
+          </h1>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Real-time pipeline orchestration and live deployment monitoring.
+          </p>
+        </div>
 
-      {/* Welcome */}
-      <div className="mb-5">
-        <h1 className="text-[20px] font-bold tracking-tight">
-          Welcome back, Ajita! 👋
-        </h1>
-
-        <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
-          Here's what's happening with your DevOps pipelines today.
-        </p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/pipelines")}
+            className="flex items-center gap-2 rounded-lg bg-orange-500 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-orange-600"
+          >
+            <Plus size={15} />
+            <span>New Pipeline</span>
+          </button>
+        </div>
       </div>
 
       {/* STAT CARDS */}
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {stats.map((stat) => {
-          const Icon = stat.icon;
+          const Icon = statIconMap[stat.icon] || GitCommit;
+          const isFailed = stat.title === "Failed Builds";
 
           return (
             <button
               key={stat.title}
               type="button"
               onClick={() => navigate(stat.path)}
-              className="min-h-[122px] rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-[#15191d]"
+              className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-[#15191d]"
             >
-              <div className="mb-3 flex items-start justify-between">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  {stat.title}
+                </span>
                 <div
-                  className={`flex h-9 w-9 items-center justify-center rounded-full ${stat.iconClass}`}
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                    stat.color === "green"
+                      ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                      : stat.color === "red"
+                      ? "bg-red-500/10 text-red-500"
+                      : stat.color === "purple"
+                      ? "bg-purple-500/10 text-purple-500"
+                      : stat.color === "orange"
+                      ? "bg-orange-500/10 text-orange-500"
+                      : "bg-blue-500/10 text-blue-500"
+                  }`}
                 >
-                  <Icon size={18} />
+                  <Icon size={16} />
                 </div>
               </div>
 
-              <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                {stat.title}
-              </p>
+              <div className="text-2xl font-bold tracking-tight">{stat.value}</div>
 
-              <p className="mt-1 text-[21px] font-bold">
-                {stat.value}
-              </p>
-
-              <p
-                className={`mt-1 flex items-center gap-1 text-[9px] ${
-                  stat.positive
-                    ? "text-green-600"
-                    : "text-red-500"
-                }`}
-              >
-                <span>{stat.positive ? "↑" : "↓"}</span>
-                {stat.change}
-              </p>
+              <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
+                <span
+                  className={
+                    isFailed
+                      ? stat.value !== "0"
+                        ? "text-red-500 font-semibold"
+                        : "text-green-500"
+                      : "text-green-500 font-semibold"
+                  }
+                >
+                  {stat.change}
+                </span>
+                <span>live status</span>
+              </div>
             </button>
           );
         })}
       </div>
 
-      {/* PIPELINE + DEPLOYMENT */}
-      <div className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-[2.1fr_1fr]">
-
-        {/* Pipeline Overview */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
-
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[13px] font-bold">
-              Pipeline Overview
-            </h2>
-
-            <div className="flex items-center gap-2">
-
-              <div className="flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1 text-[9px] text-slate-500 dark:border-slate-700 dark:text-slate-300">
-                <span className="h-2 w-2 rounded-full bg-green-500" />
-                All Systems Operational
-              </div>
-
-              <select
-                value={pipelinePeriod}
-                onChange={(e) =>
-                  setPipelinePeriod(e.target.value)
-                }
-                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[9px] outline-none dark:border-slate-700 dark:bg-[#111417]"
-              >
-                <option>This Week</option>
-                <option>Last Week</option>
-                <option>This Month</option>
-              </select>
-
-            </div>
-          </div>
-
-          <div className="flex items-start overflow-x-auto px-1 py-7">
-
-            {pipelineStages.map((stage, index) => {
-              const Icon = stage.icon;
-
-              return (
-                <div
-                  key={stage.name}
-                  className="flex min-w-[105px] flex-1 items-start"
-                >
-
-                  <button
-                    type="button"
-                    onClick={() => navigate(stage.path)}
-                    className="flex min-w-[80px] flex-col items-center rounded-lg p-1 transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                  >
-
-                    <div className="flex h-[54px] w-[54px] items-center justify-center rounded-full border border-slate-200 bg-[#f9fbff] text-blue-500 shadow-[0_0_0_7px_#f8fafc] dark:border-slate-700 dark:bg-[#151a1f] dark:shadow-[0_0_0_7px_#111417]">
-                      <Icon size={22} />
-                    </div>
-
-                    <strong className="mt-4 whitespace-nowrap text-[10px]">
-                      {stage.name}
-                    </strong>
-
-                    <span className="mt-1 whitespace-nowrap text-[9px] text-slate-500 dark:text-slate-400">
-                      {stage.value}
-                    </span>
-
-                  </button>
-
-                  {index < pipelineStages.length - 1 && (
-                    <div className="relative mt-[27px] h-[2px] flex-1 bg-slate-300 dark:bg-slate-700">
-                      <span className="absolute -right-1 -top-[3px] h-2 w-2 rounded-full bg-green-500" />
-                    </div>
-                  )}
-
-                </div>
-              );
-            })}
-
-          </div>
-        </div>
-
-        {/* Deployment History */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
-
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[13px] font-bold">
-              Deployment History
-            </h2>
-
-            <button
-              type="button"
-              onClick={() => navigate("/deployments")}
-              className="text-[9px] text-blue-500 hover:underline"
-            >
-              View all
-            </button>
-          </div>
-
+      {/* PIPELINE OVERVIEW FLOW */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+        <div className="mb-4 flex items-center justify-between">
           <div>
-            {deployments.map(
-              ([name, branch, time, status]) => (
-                <button
-                  type="button"
-                  key={`${name}-${branch}`}
-                  onClick={() => navigate("/deployments")}
-                  className="flex min-h-[45px] w-full items-center justify-between gap-3 border-b border-slate-100 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40"
-                >
-
-                  <div className="flex min-w-0 items-center gap-2">
-
-                    {status === "Success" ? (
-                      <CheckCircle2
-                        size={16}
-                        className="text-green-500"
-                      />
-                    ) : (
-                      <XCircle
-                        size={16}
-                        className="text-red-500"
-                      />
-                    )}
-
-                    <div className="flex flex-col">
-                      <strong className="text-[10px]">
-                        {name}
-                      </strong>
-
-                      <span className="mt-1 w-fit rounded bg-slate-100 px-1.5 py-0.5 text-[8px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                        {branch}
-                      </span>
-                    </div>
-
-                  </div>
-
-                  <div className="flex flex-shrink-0 items-center gap-2">
-
-                    <span className="text-[8px] text-slate-400">
-                      {time}
-                    </span>
-
-                    <StatusBadge status={status} />
-
-                  </div>
-
-                </button>
-              )
-            )}
+            <h2 className="text-sm font-bold tracking-tight">Pipeline Stage Flow</h2>
+            <p className="text-[11px] text-slate-400">
+              Aggregated cycle progression across all active pipelines
+            </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => navigate("/deployments")}
-            className="mt-3 h-8 w-full rounded-md border border-slate-200 bg-slate-50 text-[9px] font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-[#171b1f] dark:text-slate-300"
-          >
-            View all deployments →
-          </button>
-
-        </div>
-      </div>
-
-      {/* BUILD + ANALYTICS */}
-      <div className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-
-        {/* Build Activity */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
-
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[13px] font-bold">
-              Build Activity
-            </h2>
-
-            <button
-              type="button"
-              onClick={() => navigate("/builds")}
-              className="text-[9px] text-blue-500 hover:underline"
-            >
-              View all
-            </button>
-          </div>
-
-          {builds.map(
-            ([build, branch, duration, status]) => (
-              <button
-                type="button"
-                key={build}
-                onClick={() => navigate("/builds")}
-                className="flex min-h-[40px] w-full items-center justify-between border-b border-slate-100 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40"
-              >
-
-                <div className="flex items-center gap-2">
-
-                  {status === "Success" ? (
-                    <CheckCircle2
-                      size={15}
-                      className="text-green-500"
-                    />
-                  ) : (
-                    <XCircle
-                      size={15}
-                      className="text-red-500"
-                    />
-                  )}
-
-                  <strong className="text-[10px]">
-                    {build}
-                  </strong>
-
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[8px] text-slate-500 dark:bg-slate-800">
-                    {branch}
-                  </span>
-
-                </div>
-
-                <div className="flex items-center gap-3">
-
-                  <span className="text-[8px] text-slate-400">
-                    {duration}
-                  </span>
-
-                  <StatusBadge status={status} />
-
-                </div>
-
-              </button>
-            )
-          )}
-
-          <button
-            type="button"
-            onClick={() => navigate("/builds")}
-            className="mt-3 h-8 w-full rounded-md border border-slate-200 bg-slate-50 text-[9px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-[#171b1f] dark:text-slate-300"
-          >
-            View all builds →
-          </button>
-
-        </div>
-
-        {/* Pipeline Analytics */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
-
-          <div className="mb-2 flex items-center justify-between">
-
-            <h2 className="text-[13px] font-bold">
-              Pipeline Analytics
-            </h2>
-
-            <select
-              value={analyticsPeriod}
-              onChange={(e) =>
-                setAnalyticsPeriod(e.target.value)
-              }
-              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[9px] dark:border-slate-700 dark:bg-[#111417]"
-            >
-              <option>Last 7 days</option>
-              <option>Last 30 days</option>
-            </select>
-
-          </div>
-
-          <div className="flex min-h-[170px] items-center">
-
-            <div className="relative flex w-1/2 justify-center">
-
-              <div
-                className="relative flex h-[150px] w-[150px] items-center justify-center rounded-full"
-                style={{
-                  background:
-                    "conic-gradient(#16a34a 0deg 270deg, #ef4444 270deg 315deg, #3b82f6 315deg 360deg)",
-                }}
-              >
-
-                <div className="flex h-[98px] w-[98px] flex-col items-center justify-center rounded-full bg-white dark:bg-[#15191d]">
-
-                  <strong className="text-[20px]">
-                    24
-                  </strong>
-
-                  <span className="text-[9px] text-slate-500">
-                    Total
-                  </span>
-
-                </div>
-
-              </div>
-            </div>
-
-            <div className="flex flex-1 flex-col gap-4">
-
-              <div className="flex items-center gap-2 text-[9px]">
-                <span className="h-2 w-2 rounded-full bg-green-500" />
-                <span className="flex-1">
-                  Successful
-                </span>
-                <strong>18</strong>
-                <span className="text-slate-400">
-                  (75.0%)
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-[9px]">
-                <span className="h-2 w-2 rounded-full bg-red-500" />
-                <span className="flex-1">
-                  Failed
-                </span>
-                <strong>3</strong>
-                <span className="text-slate-400">
-                  (12.5%)
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-[9px]">
-                <span className="h-2 w-2 rounded-full bg-blue-500" />
-                <span className="flex-1">
-                  In Progress
-                </span>
-                <strong>3</strong>
-                <span className="text-slate-400">
-                  (12.5%)
-                </span>
-              </div>
-
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-
-            <div className="text-center">
-              <span className="text-[8px] text-slate-400">
-                Success Rate
-              </span>
-
-              <strong className="mt-1 block text-[15px]">
-                75.0%
-              </strong>
-
-              <small className="text-[8px] text-green-500">
-                ↑ 12%
-              </small>
-            </div>
-
-            <div className="border-x border-slate-100 text-center dark:border-slate-800">
-              <span className="text-[8px] text-slate-400">
-                Avg. Build Time
-              </span>
-
-              <strong className="mt-1 block text-[15px]">
-                2m 34s
-              </strong>
-
-              <small className="text-[8px] text-green-500">
-                ↓ 8%
-              </small>
-            </div>
-
-            <div className="text-center">
-              <span className="text-[8px] text-slate-400">
-                Total Deploys
-              </span>
-
-              <strong className="mt-1 block text-[15px]">
-                16
-              </strong>
-
-              <small className="text-[8px] text-green-500">
-                ↑ 33%
-              </small>
-            </div>
-
-          </div>
-        </div>
-      </div>
-
-      {/* SYSTEM HEALTH */}
-      <div className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_0.8fr]">
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
-
-          <div className="mb-2 flex items-center justify-between">
-
-            <h2 className="text-[13px] font-bold">
-              System Health
-            </h2>
-
-            <button
-              type="button"
-              onClick={() => navigate("/services")}
-              className="text-[9px] text-blue-500 hover:underline"
-            >
-              View all
-            </button>
-
-          </div>
-
-          {services.map(([service, uptime]) => (
-
-            <button
-              type="button"
-              key={service}
-              onClick={() => navigate("/services")}
-              className="flex min-h-[40px] w-full items-center justify-between border-b border-slate-100 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40"
-            >
-
-              <div className="flex items-center gap-2">
-
-                <CheckCircle2
-                  size={15}
-                  className="text-green-500"
-                />
-
-                <span className="text-[10px]">
-                  {service}
-                </span>
-
-              </div>
-
-              <div className="flex items-center gap-2">
-
-                <span className="text-[8px] text-green-500">
-                  Healthy
-                </span>
-
-                <strong className="text-[9px]">
-                  {uptime}
-                </strong>
-
-              </div>
-
-            </button>
-
-          ))}
-
-        </div>
-
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white p-5 dark:border-slate-800 dark:from-[#14191d] dark:to-[#111417]">
-
-          <div>
-            <span className="text-[9px] text-slate-500 dark:text-slate-400">
-              Overall System Status
-            </span>
-
-            <strong className="mt-2 block text-[13px] text-green-600">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-[10px] text-slate-600 dark:border-slate-700 dark:text-slate-300">
+              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
               All Systems Operational
-            </strong>
-
-            <small className="mt-1 block text-[8px] text-slate-400">
-              Last checked just now
-            </small>
-          </div>
-
-          <div className="text-right">
-
-            <strong className="block text-[28px] font-bold text-green-600">
-              99.5%
-            </strong>
-
-            <span className="text-[8px] text-slate-400">
-              uptime
             </span>
-
           </div>
-
-        </div>
-      </div>
-
-      {/* RECENT ACTIVITY */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
-
-        <div className="mb-3 flex items-center justify-between">
-
-          <h2 className="text-[13px] font-bold">
-            Recent Activity
-          </h2>
-
-          <button
-            type="button"
-            onClick={() => navigate("/logs")}
-            className="text-[9px] text-blue-500 hover:underline"
-          >
-            View all activity
-          </button>
-
         </div>
 
-        <div className="grid grid-cols-1 border-t border-slate-100 sm:grid-cols-2 xl:grid-cols-5 dark:border-slate-800">
-
-          {activities.map((activity) => {
-            const Icon = activity.icon;
+        <div className="flex items-center overflow-x-auto py-3">
+          {stages.map((stage, index) => {
+            const Icon = stageIconMap[stage.icon] || GitCommit;
 
             return (
-              <button
-                type="button"
-                key={activity.title}
-                onClick={() => navigate("/logs")}
-                className="min-h-[90px] border-b border-slate-100 px-3 py-3 text-left transition hover:bg-slate-50 xl:border-b-0 xl:border-r dark:border-slate-800 dark:hover:bg-slate-800/40"
-              >
-
-                <div
-                  className={`mb-2 flex h-7 w-7 items-center justify-center rounded-full ${activity.className}`}
+              <div key={stage.name} className="flex min-w-[130px] flex-1 items-center">
+                <button
+                  type="button"
+                  onClick={() => navigate(stage.path)}
+                  className="flex flex-col items-center rounded-xl p-2 transition hover:bg-slate-50 dark:hover:bg-slate-800/60"
                 >
-                  <Icon size={14} />
-                </div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-orange-500 shadow-sm dark:border-slate-700 dark:bg-[#12161a]">
+                    <Icon size={20} />
+                  </div>
+                  <strong className="mt-2 text-xs font-semibold">{stage.name}</strong>
+                  <span className="text-[10px] text-slate-400">{stage.value}</span>
+                </button>
 
-                <strong className="block text-[9px] leading-4">
-                  {activity.title}
-                </strong>
-
-                <span className="mt-1 block text-[8px] text-slate-500">
-                  {activity.user}
-                </span>
-
-                <small className="mt-1 block text-[7px] text-slate-400">
-                  {activity.time}
-                </small>
-
-              </button>
+                {index < stages.length - 1 && (
+                  <div className="relative mx-2 h-[2px] flex-1 bg-slate-200 dark:bg-slate-700">
+                    <span className="absolute -right-1 -top-[3px] h-2 w-2 rounded-full bg-orange-500" />
+                  </div>
+                )}
+              </div>
             );
           })}
-
         </div>
       </div>
 
-      {/* FOOTER */}
-      <div className="py-5 text-center text-[8px] text-slate-400">
-        DevOpsHub – CI/CD Pipeline Management Platform © 2024
-        <span className="ml-1">
-          | Made with ❤️ for DevOps Engineers
-        </span>
+      {/* SPLIT SECTION 1: RECENT DEPLOYMENTS & RECENT BUILDS */}
+      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Deployment History */}
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-bold">Deployment History</h2>
+            <button
+              onClick={() => navigate("/deployments")}
+              className="text-xs text-orange-500 hover:text-orange-600 font-medium"
+            >
+              View all →
+            </button>
+          </div>
+
+          {recentDeployments.length === 0 ? (
+            <div className="py-10 text-center text-xs text-slate-400">
+              <Rocket size={28} className="mx-auto mb-2 opacity-30" />
+              <p>No deployments recorded yet.</p>
+              <button
+                onClick={() => navigate("/deployments")}
+                className="mt-2 text-orange-500 hover:underline font-medium"
+              >
+                Trigger your first deployment
+              </button>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {recentDeployments.map((dep) => (
+                <div key={dep.id} className="flex items-center justify-between py-3">
+                  <div>
+                    <p className="text-xs font-semibold">{dep.name}</p>
+                    <p className="text-[10px] text-slate-400">
+                      {dep.environment} • branch {dep.branch}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-slate-400">
+                      {new Date(dep.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    <StatusBadge status={dep.status} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Build Activity */}
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-bold">Build Activity</h2>
+            <button
+              onClick={() => navigate("/builds")}
+              className="text-xs text-orange-500 hover:text-orange-600 font-medium"
+            >
+              View all →
+            </button>
+          </div>
+
+          {recentBuilds.length === 0 ? (
+            <div className="py-10 text-center text-xs text-slate-400">
+              <Hammer size={28} className="mx-auto mb-2 opacity-30" />
+              <p>No builds executed yet.</p>
+              <button
+                onClick={() => navigate("/pipelines")}
+                className="mt-2 text-orange-500 hover:underline font-medium"
+              >
+                Run a pipeline to start builds
+              </button>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {recentBuilds.map((build) => (
+                <div key={build.id} className="flex items-center justify-between py-3">
+                  <div>
+                    <p className="text-xs font-semibold">
+                      Build #{build.buildNumber} — {build.pipelineName}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      branch {build.branch} {build.commitHash ? `(${build.commitHash})` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-slate-400">{build.duration}</span>
+                    <StatusBadge status={build.status} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* SPLIT SECTION 2: ANALYTICS DONUT & RECENT ACTIVITIES */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Pipeline Analytics Donut */}
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-bold">Pipeline Analytics</h2>
+            <button
+              onClick={() => navigate("/analytics")}
+              className="text-xs text-orange-500 hover:text-orange-600 font-medium"
+            >
+              Detailed Analytics →
+            </button>
+          </div>
+
+          {totalBuilds === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400">
+              <p>No pipeline runs to chart yet.</p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Run pipelines to see live success/failure distribution.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-center justify-around gap-6">
+              <div className="relative h-44 w-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={analyticsChart}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={70}
+                      paddingAngle={3}
+                      strokeWidth={0}
+                    >
+                      {analyticsChart.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-xl font-bold">{totalBuilds}</span>
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">
+                    Builds
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                {analyticsChart.map((entry) => (
+                  <div key={entry.name} className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: entry.color }}
+                    />
+                    <span className="text-slate-500 dark:text-slate-400 min-w-[70px]">
+                      {entry.name}:
+                    </span>
+                    <strong className="font-semibold">{entry.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Live Activity Feed */}
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-bold">Recent System Activity</h2>
+            <button
+              onClick={() => navigate("/audit-logs")}
+              className="text-xs text-orange-500 hover:text-orange-600 font-medium"
+            >
+              View audit log →
+            </button>
+          </div>
+
+          {recentActivities.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-400">
+              <Activity size={28} className="mx-auto mb-2 opacity-30" />
+              <p>No recent activities.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {recentActivities.map((act) => (
+                <div key={act.id} className="flex items-center gap-3 py-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-500">
+                    <GitCommit size={15} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold">{act.title}</p>
+                    <p className="truncate text-[10px] text-slate-400">
+                      by {act.userName} • {new Date(act.createdAt).toLocaleTimeString()}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,370 +1,311 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
-  Activity,
-  CheckCircle,
+  CheckCircle2,
   Clock,
   GitBranch,
   XCircle,
   Search,
   RefreshCw,
+  Loader2,
+  Terminal,
+  X,
+  StopCircle,
 } from "lucide-react";
-
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-  orderBy,
-} from "firebase/firestore";
-
-import { onAuthStateChanged } from "firebase/auth";
-
-import { db, auth } from "../../firebase";
+import { getBuilds, cancelBuild } from "../../services/api";
+import { useSocket } from "../../context/SocketContext";
 
 function Builds() {
   const [builds, setBuilds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
 
-  useEffect(() => {
-    let unsubscribeSnapshot = null;
+  const [selectedBuild, setSelectedBuild] = useState(null);
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        setBuilds([]);
-        setLoading(false);
-        setError("Please login to view your builds.");
-        return;
+  const { socket } = useSocket();
+
+  const loadBuilds = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    try {
+      const res = await getBuilds();
+      if (res && res.success) {
+        setBuilds(res.builds);
+        setError("");
       }
-
-      setLoading(true);
-      setError("");
-
-      const buildsQuery = query(
-        collection(db, "builds"),
-        where("userId", "==", user.uid),
-        orderBy("createdAt", "desc")
-      );
-
-      unsubscribeSnapshot = onSnapshot(
-        buildsQuery,
-        (snapshot) => {
-          const buildData = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          }));
-
-          setBuilds(buildData);
-          setLoading(false);
-        },
-        (firebaseError) => {
-          console.error("Firestore Builds Error:", firebaseError);
-          setError(
-            "Unable to connect to Builds in Firebase. Please check Firestore."
-          );
-          setLoading(false);
-        }
-      );
-    });
-
-    return () => {
-      unsubscribeAuth();
-
-      if (unsubscribeSnapshot) {
-        unsubscribeSnapshot();
-      }
-    };
+    } catch (err) {
+      console.error("Failed to load builds:", err);
+      if (!isSilent) setError(err.message || "Failed to load builds.");
+    } finally {
+      if (!isSilent) setLoading(false);
+    }
   }, []);
 
-  const filteredBuilds = builds.filter((build) => {
-    const searchText = search.toLowerCase();
+  useEffect(() => {
+    loadBuilds();
+  }, [loadBuilds]);
 
-    return (
-      build.pipelineName?.toLowerCase().includes(searchText) ||
-      build.branch?.toLowerCase().includes(searchText) ||
-      build.status?.toLowerCase().includes(searchText) ||
-      build.commit?.toLowerCase().includes(searchText)
-    );
+  // Real-time socket event listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCreated = (newBuild) => {
+      setBuilds((prev) => [newBuild, ...prev.filter((b) => b.id !== newBuild.id)]);
+    };
+
+    const handleUpdated = (updated) => {
+      setBuilds((prev) => prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b)));
+      setSelectedBuild((curr) => (curr && curr.id === updated.id ? { ...curr, ...updated } : curr));
+    };
+
+    const handleLog = ({ buildId, log }) => {
+      setSelectedBuild((curr) => {
+        if (curr && curr.id === buildId) {
+          return { ...curr, logs: (curr.logs || "") + log };
+        }
+        return curr;
+      });
+    };
+
+    socket.on("build:created", handleCreated);
+    socket.on("build:updated", handleUpdated);
+    socket.on("build:log", handleLog);
+
+    return () => {
+      socket.off("build:created", handleCreated);
+      socket.off("build:updated", handleUpdated);
+      socket.off("build:log", handleLog);
+    };
+  }, [socket]);
+
+  const handleCancel = async (id) => {
+    try {
+      await cancelBuild(id);
+      loadBuilds(true);
+    } catch (err) {
+      alert(err.message || "Failed to cancel build.");
+    }
+  };
+
+  const filteredBuilds = builds.filter((build) => {
+    const matchesSearch =
+      build.pipelineName?.toLowerCase().includes(search.toLowerCase()) ||
+      build.branch?.toLowerCase().includes(search.toLowerCase()) ||
+      build.commitHash?.toLowerCase().includes(search.toLowerCase()) ||
+      String(build.buildNumber).includes(search);
+
+    const matchesStatus = statusFilter === "All" || build.status === statusFilter;
+    return matchesSearch && matchesStatus;
   });
 
   const totalBuilds = builds.length;
-
-  const successfulBuilds = builds.filter(
-    (build) => build.status === "Success"
-  ).length;
-
-  const failedBuilds = builds.filter(
-    (build) => build.status === "Failed"
-  ).length;
-
-  const runningBuilds = builds.filter(
-    (build) => build.status === "Running"
-  ).length;
-
-  const successRate =
-    totalBuilds > 0
-      ? ((successfulBuilds / totalBuilds) * 100).toFixed(1)
-      : "0.0";
-
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "Just now";
-
-    if (timestamp?.toDate) {
-      return timestamp.toDate().toLocaleString();
-    }
-
-    if (timestamp instanceof Date) {
-      return timestamp.toLocaleString();
-    }
-
-    return "Just now";
-  };
-
-  const getStatusStyle = (status) => {
-    switch (status) {
-      case "Success":
-        return "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400";
-
-      case "Failed":
-        return "bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400";
-
-      case "Running":
-        return "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400";
-
-      default:
-        return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300";
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case "Success":
-        return <CheckCircle size={16} />;
-
-      case "Failed":
-        return <XCircle size={16} />;
-
-      case "Running":
-        return <RefreshCw size={16} className="animate-spin" />;
-
-      default:
-        return <Clock size={16} />;
-    }
-  };
+  const successfulBuilds = builds.filter((b) => b.status === "SUCCESS").length;
+  const failedBuilds = builds.filter((b) => b.status === "FAILED").length;
+  const runningBuilds = builds.filter((b) => b.status === "RUNNING").length;
 
   return (
     <div className="p-6">
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+      {/* Header */}
+      <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold">Builds</h1>
-
-          <p className="text-gray-500 mt-1">
-            Monitor your CI/CD build activity in real time.
+          <h1 className="text-xl font-bold tracking-tight">Builds</h1>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Real-time pipeline execution history, status telemetry, and container logs.
           </p>
         </div>
 
-        <div className="relative">
-          <Search
-            size={18}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-          />
+        <button
+          onClick={() => loadBuilds()}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-[#15191d] dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          <span>Refresh</span>
+        </button>
+      </div>
 
-          <input
-            type="text"
-            placeholder="Search builds..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full md:w-72 pl-10 pr-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#15191e] outline-none focus:ring-2 focus:ring-orange-500"
-          />
+      {/* Stats Counter Bar */}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
+          <span className="text-[11px] font-medium text-slate-400">Total Executed</span>
+          <p className="mt-1 text-2xl font-bold">{totalBuilds}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
+          <span className="text-[11px] font-medium text-slate-400">Successful</span>
+          <p className="mt-1 text-2xl font-bold text-green-500">{successfulBuilds}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
+          <span className="text-[11px] font-medium text-slate-400">Failed</span>
+          <p className="mt-1 text-2xl font-bold text-red-500">{failedBuilds}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#15191d]">
+          <span className="text-[11px] font-medium text-slate-400">In Progress</span>
+          <p className="mt-1 text-2xl font-bold text-blue-500">{runningBuilds}</p>
         </div>
       </div>
 
-      {/* ERROR */}
-      {error && (
-        <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 text-red-600 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400">
-          {error}
+      {/* Controls: Search & Filter */}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full sm:w-72">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter by build #, pipeline, branch..."
+            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:border-slate-800 dark:bg-[#15191d] dark:text-white"
+          />
+        </div>
+
+        <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          {["All", "RUNNING", "SUCCESS", "FAILED"].map((status) => (
+            <button
+              key={status}
+              onClick={() => setStatusFilter(status)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                statusFilter === status
+                  ? "bg-orange-500 text-white"
+                  : "bg-white text-slate-600 hover:bg-slate-50 dark:bg-[#15191d] dark:text-slate-400 dark:hover:bg-slate-800"
+              }`}
+            >
+              {status}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Builds Table */}
+      {loading ? (
+        <div className="flex min-h-[30vh] items-center justify-center">
+          <Loader2 size={28} className="animate-spin text-orange-500" />
+        </div>
+      ) : filteredBuilds.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <Clock size={32} className="mx-auto mb-2 text-slate-400 opacity-40" />
+          <p className="text-sm font-semibold">No Builds Found</p>
+          <p className="mt-1 text-xs text-slate-400">
+            {builds.length === 0
+              ? "Trigger a pipeline run to produce your first build telemetry."
+              : "No builds matched your filter criteria."}
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#15191d]">
+          <table className="w-full text-left text-xs">
+            <thead className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-800/20 dark:text-slate-400">
+              <tr>
+                <th className="p-3.5">Build #</th>
+                <th className="p-3.5">Pipeline</th>
+                <th className="p-3.5">Branch / Commit</th>
+                <th className="p-3.5">Status</th>
+                <th className="p-3.5">Duration</th>
+                <th className="p-3.5">Triggered</th>
+                <th className="p-3.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filteredBuilds.map((build) => {
+                const isRunning = build.status === "RUNNING";
+                const isSuccess = build.status === "SUCCESS";
+                const isFailed = build.status === "FAILED";
+
+                return (
+                  <tr key={build.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                    <td className="p-3.5 font-bold">#{build.buildNumber}</td>
+                    <td className="p-3.5 font-semibold text-slate-800 dark:text-slate-200">
+                      {build.pipelineName}
+                    </td>
+                    <td className="p-3.5 text-slate-500 dark:text-slate-400">
+                      <span className="font-mono text-[11px]">
+                        {build.branch} {build.commitHash ? `(${build.commitHash})` : ""}
+                      </span>
+                    </td>
+                    <td className="p-3.5">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                          isRunning
+                            ? "bg-blue-500/10 text-blue-500"
+                            : isSuccess
+                            ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                            : "bg-red-500/10 text-red-500"
+                        }`}
+                      >
+                        {isRunning ? (
+                          <Loader2 size={11} className="animate-spin" />
+                        ) : isSuccess ? (
+                          <CheckCircle2 size={11} />
+                        ) : (
+                          <XCircle size={11} />
+                        )}
+                        {build.status}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-slate-500 dark:text-slate-400">{build.duration}</td>
+                    <td className="p-3.5 text-slate-400">
+                      {new Date(build.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td className="p-3.5 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setSelectedBuild(build)}
+                          className="flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                          title="View Execution Logs"
+                        >
+                          <Terminal size={12} />
+                          <span>Logs</span>
+                        </button>
+
+                        {isRunning && (
+                          <button
+                            onClick={() => handleCancel(build.id)}
+                            className="flex items-center gap-1 rounded bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-500 hover:bg-red-500/20"
+                            title="Cancel Build"
+                          >
+                            <StopCircle size={12} />
+                            <span>Stop</span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* STAT CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Stat
-          title="Total Builds"
-          value={totalBuilds}
-          icon={<Activity size={20} />}
-        />
-
-        <Stat
-          title="Successful"
-          value={successfulBuilds}
-          icon={<CheckCircle size={20} />}
-        />
-
-        <Stat
-          title="Failed"
-          value={failedBuilds}
-          icon={<XCircle size={20} />}
-        />
-
-        <Stat
-          title="Running"
-          value={runningBuilds}
-          icon={<RefreshCw size={20} />}
-        />
-      </div>
-
-      {/* SUCCESS RATE */}
-      <div className="bg-white dark:bg-[#15191e] border border-gray-200 dark:border-gray-800 rounded-xl p-5 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="text-gray-500 text-sm">Build Success Rate</p>
-
-            <p className="text-2xl font-bold mt-1">
-              {successRate}%
-            </p>
-          </div>
-
-          <div className="w-12 h-12 rounded-xl bg-green-50 dark:bg-green-900/20 flex items-center justify-center text-green-500">
-            <CheckCircle size={24} />
-          </div>
-        </div>
-
-        <div className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-green-500 rounded-full transition-all duration-500"
-            style={{
-              width: `${Math.min(Number(successRate), 100)}%`,
-            }}
-          />
-        </div>
-      </div>
-
-      {/* BUILDS TABLE */}
-      <div className="bg-white dark:bg-[#15191e] rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
-          <h2 className="font-semibold text-lg">Build History</h2>
-
-          <p className="text-sm text-gray-500 mt-1">
-            Firebase real-time build data
-          </p>
-        </div>
-
-        {loading ? (
-          <div className="p-10 text-center text-gray-500">
-            Loading builds from Firebase...
-          </div>
-        ) : filteredBuilds.length === 0 ? (
-          <div className="p-10 text-center">
-            <div className="w-14 h-14 mx-auto rounded-xl bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center text-orange-500 mb-4">
-              <Activity size={26} />
+      {/* LOGS MODAL */}
+      {selectedBuild && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="flex h-[80vh] w-full max-w-3xl flex-col rounded-2xl border border-slate-700 bg-[#0d1117] text-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-800 px-5 py-3">
+              <div>
+                <h3 className="text-xs font-bold text-orange-400">
+                  Build #{selectedBuild.buildNumber} Console Output
+                </h3>
+                <p className="text-[10px] text-gray-400">
+                  {selectedBuild.pipelineName} • {selectedBuild.branch} • Status: {selectedBuild.status}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedBuild(null)}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            <h3 className="font-semibold text-lg">
-              No builds found
-            </h3>
-
-            <p className="text-gray-500 mt-1">
-              Builds created from your pipelines will appear here.
-            </p>
+            <div className="flex-1 overflow-y-auto p-4 font-mono text-xs text-gray-300">
+              <pre className="whitespace-pre-wrap leading-relaxed">
+                {selectedBuild.logs || "No console output recorded for this build."}
+              </pre>
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50 dark:bg-[#101418] text-left">
-                  <th className="p-4">Build</th>
-                  <th className="p-4">Pipeline</th>
-                  <th className="p-4">Branch</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">Commit</th>
-                  <th className="p-4">Created</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredBuilds.map((build) => (
-                  <tr
-                    key={build.id}
-                    className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-[#101418]"
-                  >
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center text-orange-500">
-                          <Activity size={18} />
-                        </div>
-
-                        <div>
-                          <p className="font-medium">
-                            {build.buildNumber
-                              ? `Build #${build.buildNumber}`
-                              : `Build ${build.id.slice(0, 6)}`}
-                          </p>
-
-                          {build.duration && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              {build.duration}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="p-4 font-medium">
-                      {build.pipelineName || "Unknown Pipeline"}
-                    </td>
-
-                    <td className="p-4">
-                      <div className="flex items-center gap-2 text-gray-500">
-                        <GitBranch size={16} />
-                        {build.branch || "main"}
-                      </div>
-                    </td>
-
-                    <td className="p-4">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${getStatusStyle(
-                          build.status
-                        )}`}
-                      >
-                        {getStatusIcon(build.status)}
-                        {build.status || "Created"}
-                      </span>
-                    </td>
-
-                    <td className="p-4 text-gray-500">
-                      {build.commit || "—"}
-                    </td>
-
-                    <td className="p-4 text-gray-500 text-sm">
-                      {formatDate(build.createdAt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Stat({ title, value, icon }) {
-  return (
-    <div className="bg-white dark:bg-[#15191e] border border-gray-200 dark:border-gray-800 rounded-xl p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-gray-500 text-sm">{title}</p>
-
-          <p className="text-2xl font-bold mt-2">{value}</p>
         </div>
-
-        <div className="w-10 h-10 rounded-lg bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center text-orange-500">
-          {icon}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

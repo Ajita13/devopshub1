@@ -1,0 +1,181 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "./client"
+}
+
+model User {
+  id           String         @id @default(uuid())
+  name         String
+  email        String         @unique
+  password     String
+  role         String         @default("user") // "user" | "admin"
+  avatar       String?
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  refreshTokens RefreshToken[]
+  pipelines     Pipeline[]
+  builds        Build[]
+  deployments   Deployment[]
+  activities    ActivityLog[]
+  logs          SystemLog[]
+  secrets       ProjectSecret[]
+  environments  EnvironmentConfig[]
+  releases      ReleaseRecord[]
+  triggers      TriggerItem[]
+  webhooks      WebhookItem[]
+  services      ServiceItem[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Pipeline {
+  id          String   @id @default(uuid())
+  name        String
+  repository  String
+  branch      String   @default("main")
+  environment String   @default("Development")
+  status      String   @default("IDLE") // IDLE, RUNNING, SUCCESS, FAILED
+  triggerType String   @default("Manual")
+  lastRunAt   DateTime?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  builds      Build[]
+}
+
+model Build {
+  id              String    @id @default(uuid())
+  buildNumber     Int
+  pipelineId      String?
+  pipeline        Pipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
+  pipelineName    String
+  branch          String    @default("main")
+  commitHash      String?
+  commitMessage   String?
+  status          String    @default("PENDING") // PENDING, RUNNING, SUCCESS, FAILED
+  duration        String    @default("0s")
+  durationSeconds Int       @default(0)
+  triggeredBy     String    @default("Manual")
+  logs            String?
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+}
+
+model Deployment {
+  id              String   @id @default(uuid())
+  name            String
+  environment     String   @default("Production") // Production, Staging, Development, QA
+  branch          String   @default("main")
+  status          String   @default("PENDING") // PENDING, IN_PROGRESS, SUCCESS, FAILED
+  deployedBy      String   @default("System")
+  duration        String   @default("0s")
+  durationSeconds Int      @default(0)
+  pipelineId      String?
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  title     String
+  type      String   @default("code") // code, build, deploy, security, test, system
+  userName  String
+  details   String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String   @default("INFO") // INFO, WARN, ERROR, DEBUG
+  service   String   @default("CI/CD Service")
+  message   String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model ProjectSecret {
+  id          String   @id @default(uuid())
+  key         String
+  environment String   @default("Production")
+  status      String   @default("Protected")
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EnvironmentConfig {
+  id        String   @id @default(uuid())
+  name      String
+  branch    String   @default("main")
+  status    String   @default("Healthy")
+  uptime    String   @default("99.9%")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model ReleaseRecord {
+  id          String   @id @default(uuid())
+  version     String
+  environment String   @default("Production")
+  status      String   @default("Success")
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+}
+
+model TriggerItem {
+  id        String   @id @default(uuid())
+  name      String
+  branch    String   @default("main")
+  status    String   @default("Active")
+  source    String   @default("GitHub")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model WebhookItem {
+  id               String   @id @default(uuid())
+  name             String
+  connectionStatus String   @default("Connected")
+  state            String   @default("Active")
+  provider         String   @default("GitHub")
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now())
+}
+
+model ServiceItem {
+  id        String   @id @default(uuid())
+  name      String
+  category  String   @default("Service")
+  status    String   @default("Connected")
+  health    String   @default("Healthy")
+  uptime    String   @default("99.9%")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
