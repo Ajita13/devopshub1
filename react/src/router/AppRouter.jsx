@@ -16,6 +16,7 @@ import Deployments from "../pages/Deployments/Deployments";
 import Analytics from "../pages/Analytics/Analytics";
 import Logs from "../pages/Logs/Logs";
 import Settings from "../pages/Settings/Settings";
+import GeneralSettings from "../pages/Settings/GeneralSettings";
 
 import ModulePage from "../pages/ModulePage";
 
@@ -327,14 +328,7 @@ function AppRouter() {
             />
 
             <Route
-              path="/general-settings"
-              element={
-                <ModulePage
-                  title="General Settings"
-                  description="Configure your DevOpsHub preferences."
-                  type="general"
-                />
-              }
+              path="/general-settings" element={<GeneralSettings />}
             />
 
             <Route
